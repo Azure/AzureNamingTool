@@ -222,6 +222,24 @@ namespace AzureNamingTool.UnitTests.Services
 
         #endregion
 
+        #region Resource Instance Tests
+
+        [Fact]
+        public void ReplaceResourceInstance_ShouldOnlyReplaceTrackedComponent_WhenInstanceIsNotLast()
+        {
+            const string originalName = "app-01-zone-01";
+
+            var result = ResourceNamingRequestService.ReplaceResourceInstance(
+                originalName,
+                originalName.IndexOf("01", System.StringComparison.Ordinal),
+                2,
+                "02");
+
+            result.Should().Be("app-02-zone-01");
+        }
+
+        #endregion
+
         #region Error Handling Tests
 
         [Fact]

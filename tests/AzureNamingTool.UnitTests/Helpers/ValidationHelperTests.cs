@@ -1,12 +1,164 @@
 using AzureNamingTool.Helpers;
 using AzureNamingTool.Models;
 using FluentAssertions;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace AzureNamingTool.UnitTests.Helpers;
 
 public class ValidationHelperTests
 {
+    [Fact]
+    public void RepositoryDefaults_ShouldHaveConsistentResourceLocationMetadata()
+    {
+        var resourceLocations = LoadRepositoryResourceLocations();
+
+        resourceLocations.Select(x => x.Id).Should().BeEquivalentTo(
+            Enumerable.Range(1, resourceLocations.Count).Select(x => (long)x),
+            options => options.WithStrictOrdering());
+        resourceLocations.Select(x => x.Name).Should().OnlyHaveUniqueItems();
+        resourceLocations.Select(x => x.ShortName).Should().OnlyHaveUniqueItems();
+        resourceLocations.Should().ContainSingle(x => x.Name == "Denmark East" && x.ShortName == "dke");
+        resourceLocations.Should().ContainSingle(x => x.Name == "India South Central" && x.ShortName == "insc");
+        resourceLocations.Should().ContainSingle(x => x.Name == "South India" && x.ShortName == "ins");
+        resourceLocations.Should().ContainSingle(x => x.Name == "China East 3" && x.ShortName == "cne3");
+    }
+
+    [Fact]
+    public void RepositoryDefaults_ShouldHaveConsistentResourceTypeMetadata()
+    {
+        var resourceTypes = LoadRepositoryResourceTypes();
+
+        resourceTypes.Select(x => x.Id).Should().BeEquivalentTo(
+            Enumerable.Range(1, resourceTypes.Count),
+            options => options.WithStrictOrdering());
+        resourceTypes
+            .Select(x => $"{x.Resource}|{x.Property}")
+            .Should().OnlyHaveUniqueItems();
+        resourceTypes
+            .Where(x => !string.IsNullOrWhiteSpace(x.Regx))
+            .Should().OnlyContain(x => TryCompileRegex(x.Regx));
+        resourceTypes
+            .Where(x => !string.IsNullOrWhiteSpace(x.StaticValues))
+            .SelectMany(x => x.StaticValues.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(value => (ResourceType: x, Value: value)))
+            .Should().OnlyContain(x => Regex.IsMatch(x.Value, x.ResourceType.Regx));
+    }
+
+    [Theory]
+    [InlineData("App/containerApps", "my-container-app", true)]
+    [InlineData("App/containerApps", "MyContainerApp", false)]
+    [InlineData("Network/privateEndpoints", "private.endpoint_01", true)]
+    [InlineData("Network/privateEndpoints", "-private-endpoint", false)]
+    [InlineData("Synapse/workspaces", "analytics-01", true)]
+    [InlineData("Synapse/workspaces", "analytics-ondemand", false)]
+    [InlineData("Storage/storageAccounts/blobServices", "default", true)]
+    [InlineData("Storage/storageAccounts/blobServices", "not-default", false)]
+    [InlineData("AppConfiguration/configurationStores", "config--store", true)]
+    [InlineData("AppConfiguration/configurationStores", "config---store", false)]
+    [InlineData("MobileNetwork/mobileNetworks/services", "default", false)]
+    [InlineData("MobileNetwork/mobileNetworks/services", "voice-service", true)]
+    [InlineData("NetworkCloud/clusters/metricsConfigurations", "default", true)]
+    [InlineData("NetworkCloud/clusters/metricsConfigurations", "metrics", false)]
+    [InlineData("Security/informationProtectionPolicies", "effective", true)]
+    [InlineData("Security/informationProtectionPolicies", "default", false)]
+    [InlineData("AppPlatform/spring", "spring-app", true)]
+    [InlineData("AppPlatform/spring", "app-", false)]
+    [InlineData("AppPlatform/spring", "----", false)]
+    public void RepositoryDefaults_ShouldEnforceCurrentAzureNameRules(
+        string resourceName,
+        string candidate,
+        bool expectedValid)
+    {
+        var resourceType = LoadRepositoryResourceTypes()
+            .Should().ContainSingle(x => x.Resource == resourceName).Subject;
+
+        Regex.IsMatch(candidate, resourceType.Regx).Should().Be(expectedValid);
+    }
+
+    [Theory]
+    [InlineData("Subscription/subscriptions")]
+    [InlineData("Management/managementGroups")]
+    public void RepositoryDefaults_ShouldConfigureTenantLevelNameValidation(string resourceName)
+    {
+        var repositoryPath = Path.Combine(AppContext.BaseDirectory, "repository", "resourcetypes.json");
+        var resourceTypes = JsonSerializer.Deserialize<List<ResourceType>>(
+            File.ReadAllText(repositoryPath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        var resourceType = resourceTypes.Should().ContainSingle(x => x.Resource == resourceName).Subject;
+
+        resourceType.LengthMin.Should().NotBeNullOrWhiteSpace();
+        resourceType.LengthMax.Should().NotBeNullOrWhiteSpace();
+        resourceType.Regx.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Theory]
+    [InlineData("Subscription/subscriptions", "Contoso_Azure-(Prod).01", true, "Contoso_Azure-(Prod).01")]
+    [InlineData("Subscription/subscriptions", "Contoso/Prod", false, "Contoso/Prod")]
+    [InlineData("Management/managementGroups", "Contoso_Prod-(01)", true, "Contoso_Prod-(01)")]
+    [InlineData("Management/managementGroups", ".Contoso", false, ".Contoso")]
+    [InlineData("Management/managementGroups", "Contoso.", false, "Contoso.")]
+    public void RepositoryDefaults_ShouldEnforceTenantLevelNameRules(
+        string resourceName,
+        string candidate,
+        bool expectedValid,
+        string expectedName)
+    {
+        var repositoryPath = Path.Combine(AppContext.BaseDirectory, "repository", "resourcetypes.json");
+        var resourceTypes = JsonSerializer.Deserialize<List<ResourceType>>(
+            File.ReadAllText(repositoryPath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var resourceType = resourceTypes.Should().ContainSingle(x => x.Resource == resourceName).Subject;
+
+        var result = ValidationHelper.ValidateGeneratedName(resourceType, candidate, "-");
+
+        result.Valid.Should().Be(expectedValid);
+        result.Name.Should().Be(expectedName);
+    }
+
+    [Fact]
+    public void RepositoryDefaults_ShouldEnforceSubscriptionLengthLimit()
+    {
+        var resourceType = LoadRepositoryResourceTypes()
+            .Should().ContainSingle(x => x.Resource == "Subscription/subscriptions").Subject;
+
+        ValidationHelper.ValidateGeneratedName(resourceType, new string('a', 50), "")
+            .Valid.Should().BeTrue();
+        ValidationHelper.ValidateGeneratedName(resourceType, new string('a', 51), "")
+            .Valid.Should().BeFalse();
+    }
+
+    private static List<ResourceType> LoadRepositoryResourceTypes()
+    {
+        var repositoryPath = Path.Combine(AppContext.BaseDirectory, "repository", "resourcetypes.json");
+        return JsonSerializer.Deserialize<List<ResourceType>>(
+            File.ReadAllText(repositoryPath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+    }
+
+    private static List<ResourceLocation> LoadRepositoryResourceLocations()
+    {
+        var repositoryPath = Path.Combine(AppContext.BaseDirectory, "repository", "resourcelocations.json");
+        return JsonSerializer.Deserialize<List<ResourceLocation>>(
+            File.ReadAllText(repositoryPath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+    }
+
+    private static bool TryCompileRegex(string pattern)
+    {
+        try
+        {
+            _ = new Regex(pattern);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     [Theory]
     [InlineData("Test1234", true)]
     [InlineData("Password1", true)]
@@ -601,4 +753,3 @@ public class ValidationHelperTests
 
     #endregion
 }
-

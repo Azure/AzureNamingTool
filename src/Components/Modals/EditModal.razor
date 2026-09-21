@@ -62,6 +62,7 @@
                         </div>
                     }
                 }
+                </div>
                 <div class="modern-card" style="margin-bottom: 1rem;">
                     <div class="modern-card-header">
                         Configuration
@@ -518,20 +519,14 @@
                                 if (resourceComponent.Name != "ResourceType")
                                 {
                                     <div class="form-check">
-                                        @if (optional.ToLower().Split(',').Contains(GeneralHelper.NormalizeName(resourceComponent.Name, true)))
-                                        {
-                                            <input title="Optional Component" class="form-check-input" type="checkbox" value="" id="optional-@GeneralHelper.NormalizeName(resourceComponent.Name, true)" checked>
-                                            <label class="form-check-label" for="optional-@GeneralHelper.NormalizeName(resourceComponent.Name, true)">
-                                                @resourceComponent.DisplayName
-                                            </label>
-                                        }
-                                        else
-                                        {
-                                            <input title="Optional Component" class="form-check-input" type="checkbox" value="" id="optional-@GeneralHelper.NormalizeName(resourceComponent.Name, true)">
-                                            <label class="form-check-label" for="optional-@GeneralHelper.NormalizeName(resourceComponent.Name, true)">
-                                                @resourceComponent.DisplayName
-                                            </label>
-                                        }
+                                        @{ var normalizedName = GeneralHelper.NormalizeName(resourceComponent.Name, true); }
+                                        <input title="Optional Component" class="form-check-input" type="checkbox"
+                                               id="optional-@normalizedName"
+                                               checked="@optionalComponents.Contains(normalizedName)"
+                                               @onchange="args => SetComponentSelection(optionalComponents, normalizedName, args)">
+                                        <label class="form-check-label" for="optional-@normalizedName">
+                                            @resourceComponent.DisplayName
+                                        </label>
                                     </div>
                                 }
                             }
@@ -548,20 +543,14 @@
                                 //@if (resourceComponent.Name != "ResourceType")
                                 //{
                                 <div class="form-check">
-                                    @if (exclude.ToLower().Split(',').Contains(GeneralHelper.NormalizeName(resourceComponent.Name, true)))
-                                    {
-                                        <input title="Excluded Component" class="form-check-input" type="checkbox" id="exclude-@GeneralHelper.NormalizeName(resourceComponent.Name, true)" checked>
-                                        <label class="form-check-label" for="exclude-@GeneralHelper.NormalizeName(resourceComponent.Name, true)">
-                                            @resourceComponent.DisplayName
-                                        </label>
-                                    }
-                                    else
-                                    {
-                                        <input title="Excluded Component" class="form-check-input" type="checkbox" id="exclude-@GeneralHelper.NormalizeName(resourceComponent.Name, true)">
-                                        <label class="form-check-label" for="exclude-@GeneralHelper.NormalizeName(resourceComponent.Name, true)">
-                                            @resourceComponent.DisplayName
-                                        </label>
-                                    }
+                                    @{ var normalizedName = GeneralHelper.NormalizeName(resourceComponent.Name, true); }
+                                    <input title="Excluded Component" class="form-check-input" type="checkbox"
+                                           id="exclude-@normalizedName"
+                                           checked="@excludedComponents.Contains(normalizedName)"
+                                           @onchange="args => SetComponentSelection(excludedComponents, normalizedName, args)">
+                                    <label class="form-check-label" for="exclude-@normalizedName">
+                                        @resourceComponent.DisplayName
+                                    </label>
                                 </div>
                                 //}
                             }
@@ -571,12 +560,10 @@
             </div>
         </div>
     </div>
-</div>
-</div>
-
-<div class="modern-modal-footer">
-    <button title="Save" @onclick="Save" class="modern-btn-success">Update</button>
-    <button title="Cancel" @onclick="Cancel" class="modern-btn-secondary">Close</button>
+    <div class="modern-modal-footer">
+        <button title="Save" @onclick="Save" class="modern-btn-success">Update</button>
+        <button title="Cancel" @onclick="Cancel" class="modern-btn-secondary">Close</button>
+    </div>
 </div>
 
 
@@ -662,9 +649,8 @@
     private bool itemApplyDelimiterAfter = true;   // Used to determine if the delimiter will be added after the component
     private bool itemApplyDelimiter = true; // Used to determine if the delimiter is applied to the resource type (all components)
     private List<ResourceComponent> resourceComponents = new();
-    private string optional = String.Empty;
-    private string exclude = String.Empty;
-    private bool ischecked = false;
+    private HashSet<string> optionalComponents = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> excludedComponents = new(StringComparer.OrdinalIgnoreCase);
     private string currentuser = String.Empty;
     private string namelabel = "Name";
     private ResponseMessage responseMessage = new();
@@ -726,8 +712,8 @@
                 namelabel = "Resource";
                 itemShortName = resourceType.ShortName;
                 itemDescription = resourceType.Description ?? String.Empty;
-                optional = resourceType.Optional;
-                exclude = resourceType.Exclude;
+                optionalComponents = ParseComponentSelection(resourceType.Optional);
+                excludedComponents = ParseComponentSelection(resourceType.Exclude);
                 itemRegEx = resourceType.Regx;
                 itemMinLength = resourceType.LengthMin;
                 itemMinLengthOriginal = itemMinLength;
@@ -894,8 +880,13 @@
                                 ResourceType resourceType = servicesData.ResourceTypes!.Find(x => x.Id == id)!;
                                 resourceType.ShortName = itemShortName;
                                 resourceType.Description = itemDescription;
-                                resourceType.Optional = "";
-                                resourceType.Exclude = "";
+                                resourceType.Optional = String.Join(",", resourceComponents
+                                    .Where(x => x.Name != "ResourceType")
+                                    .Select(x => GeneralHelper.NormalizeName(x.Name, false))
+                                    .Where(optionalComponents.Contains));
+                                resourceType.Exclude = String.Join(",", resourceComponents
+                                    .Select(x => GeneralHelper.NormalizeName(x.Name, false))
+                                    .Where(excludedComponents.Contains));
                                 resourceType.ApplyDelimiter = itemApplyDelimiter;
                                 if (!String.IsNullOrEmpty(itemMinLength.ToString()))
                                 {
@@ -921,38 +912,6 @@
                                 resourceType.InvalidCharactersConsecutive = itemInvalidCharactersConsecutive;
                                 resourceType.StaticValues = itemStaticValues;
 
-                                // Update the Optional and Exclude components
-                                foreach (ResourceComponent resourceComponent in resourceComponents)
-                                {
-                                    if (resourceComponent.Name != "ResourceType")
-                                    {
-                                        // Optional
-                                        ischecked = false;
-                                        ischecked = await JsRuntime.InvokeAsync<bool>("IsElementChecked", "optional-" + GeneralHelper.NormalizeName(resourceComponent.Name, true));
-                                        if (ischecked)
-                                        {
-                                            List<string> currentoptional = new List<string>(resourceType.Optional.Split(','));
-                                            if (!currentoptional.Contains(resourceComponent.Name))
-                                            {
-                                                currentoptional.Add(GeneralHelper.NormalizeName(resourceComponent.Name, true));
-                                                resourceType.Optional = String.Join(",", currentoptional.ToArray());
-                                            }
-                                        }
-                                    }
-
-                                    // Exclude
-                                    ischecked = false;
-                                    ischecked = await JsRuntime.InvokeAsync<bool>("IsElementChecked", "exclude-" + GeneralHelper.NormalizeName(resourceComponent.Name, true));
-                                    if (ischecked)
-                                    {
-                                        List<string> currentexclude = new List<string>(resourceType.Exclude.Split(','));
-                                        if (!currentexclude.Contains(resourceComponent.Name))
-                                        {
-                                            currentexclude.Add(GeneralHelper.NormalizeName(resourceComponent.Name, true));
-                                            resourceType.Exclude = String.Join(",", currentexclude.ToArray());
-                                        }
-                                    }
-                                }
                                 serviceResponse = await ResourceTypeService.PostItemAsync(resourceType);
                                 break;
                             case "ResourceUnitDept":
@@ -1210,5 +1169,24 @@
     private void DismissWarningAlert()
     {
         isWarningAlertDismissed = true;
+    }
+
+    private static HashSet<string> ParseComponentSelection(string? value)
+    {
+        return new HashSet<string>(
+            (value ?? String.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void SetComponentSelection(HashSet<string> selection, string component, ChangeEventArgs args)
+    {
+        if (args.Value is true)
+        {
+            selection.Add(component);
+        }
+        else
+        {
+            selection.Remove(component);
+        }
     }
 }

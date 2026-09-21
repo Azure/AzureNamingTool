@@ -343,5 +343,20 @@
     "id": 69,
     "name": "Spain Central",
     "shortName": "esc"
+  },
+  {
+    "id": 70,
+    "name": "Denmark East",
+    "shortName": "dke"
+  },
+  {
+    "id": 71,
+    "name": "India South Central",
+    "shortName": "insc"
+  },
+  {
+    "id": 72,
+    "name": "China East 3",
+    "shortName": "cne3"
   }
 ]

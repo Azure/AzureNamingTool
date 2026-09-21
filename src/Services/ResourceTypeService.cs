@@ -458,51 +458,66 @@ namespace AzureNamingTool.Services
                                 List<ResourceType> resourceTypes = (List<ResourceType>)serviceResponse.ResponseObject!;
                                 if (GeneralHelper.IsNotNull(resourceTypes))
                                 {
-                                    List<string> currentvalues = [];
+                                    bool hasUpdates = false;
+
+                                    static List<string> ParseComponentValues(string? values)
+                                    {
+                                        return [.. (values ?? string.Empty)
+                                            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                            .Select(x => x.Trim())
+                                            .Where(x => !string.IsNullOrWhiteSpace(x))];
+                                    }
+
                                     // Update all the resource type component settings
                                     foreach (ResourceType currenttype in resourceTypes)
                                     {
                                         switch (operation)
                                         {
                                             case "optional-add":
-                                                currentvalues = new List<string>(currenttype.Optional.Split(','));
-                                                if (!currentvalues.Contains(component))
+                                                var optionalAddValues = ParseComponentValues(currenttype.Optional);
+                                                if (!optionalAddValues.Contains(component))
                                                 {
-                                                    currentvalues.Add(component);
-                                                    currenttype.Optional = String.Join(",", [.. currentvalues]);
-                                                    await PostItemAsync(currenttype);
+                                                    optionalAddValues.Add(component);
+                                                    currenttype.Optional = String.Join(",", [.. optionalAddValues]);
+                                                    hasUpdates = true;
                                                 }
                                                 break;
                                             case "optional-remove":
-                                                currentvalues = new List<string>(currenttype.Optional.Split(','));
-                                                if (currentvalues.Contains(component))
+                                                var optionalRemoveValues = ParseComponentValues(currenttype.Optional);
+                                                if (optionalRemoveValues.Remove(component))
                                                 {
-                                                    currentvalues.Remove(component);
-                                                    currenttype.Optional = String.Join(",", [.. currentvalues]);
-                                                    await PostItemAsync(currenttype);
+                                                    currenttype.Optional = String.Join(",", [.. optionalRemoveValues]);
+                                                    hasUpdates = true;
                                                 }
                                                 break;
                                             case "exclude-add":
-                                                currentvalues = new List<string>(currenttype.Exclude.Split(','));
-                                                if (!currentvalues.Contains(component))
+                                                var excludeAddValues = ParseComponentValues(currenttype.Exclude);
+                                                if (!excludeAddValues.Contains(component))
                                                 {
-                                                    currentvalues.Add(component);
-                                                    currenttype.Exclude = String.Join(",", [.. currentvalues]);
-                                                    await PostItemAsync(currenttype);
+                                                    excludeAddValues.Add(component);
+                                                    currenttype.Exclude = String.Join(",", [.. excludeAddValues]);
+                                                    hasUpdates = true;
                                                 }
                                                 break;
                                             case "exclude-remove":
-                                                currentvalues = new List<string>(currenttype.Exclude.Split(','));
-                                                if (currentvalues.Contains(component))
+                                                var excludeRemoveValues = ParseComponentValues(currenttype.Exclude);
+                                                if (excludeRemoveValues.Remove(component))
                                                 {
-                                                    currentvalues.Remove(component);
-                                                    currenttype.Exclude = String.Join(",", [.. currentvalues]);
-                                                    await PostItemAsync(currenttype);
+                                                    currenttype.Exclude = String.Join(",", [.. excludeRemoveValues]);
+                                                    hasUpdates = true;
                                                 }
                                                 break;
                                         }
                                     }
-                                    serviceResponse.ResponseObject = "Resource Types updated!";
+
+                                    if (hasUpdates)
+                                    {
+                                        await _repository.SaveAllAsync([.. resourceTypes.OrderBy(x => x.Id)]);
+                                    }
+
+                                    serviceResponse.ResponseObject = hasUpdates
+                                        ? "Resource Types updated!"
+                                        : "Resource Types already up to date.";
                                     serviceResponse.Success = true;
                                 }
                                 else

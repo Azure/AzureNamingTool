@@ -4,7 +4,7 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<Version>5.0.2</Version>
+		<Version>5.0.3</Version>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<NoWarn>$(NoWarn);CS8602;CS8600;CS1998</NoWarn>
 		<UserSecretsId>eca63fb9-b7f9-454f-910b-5088ae877085</UserSecretsId>
@@ -14,10 +14,15 @@
 
 	<ItemGroup>
 		<Content Remove="Components\General\NavMenu.razor" />
+		<Content Remove="publish\**\*" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<None Remove="Components\General\NavMenu.razor.css" />
+		<None Remove="publish\**\*" />
+		<Compile Remove="publish\**\*" />
+		<EmbeddedResource Remove="publish\**\*" />
+		<AdditionalFiles Remove="publish\**\*" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -35,9 +40,10 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Microsoft.OpenApi" Version="2.3.10" />
+		<PackageReference Include="Microsoft.OpenApi" Version="3.9.0" />
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
 		<PackageReference Include="PSC.Blazor.Components.MarkdownEditor" Version="8.0.8" />
+		<PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
 		<PackageReference Include="Swashbuckle.AspNetCore.Swagger" Version="10.0.1" />
 		<PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="10.0.1" />
 		<PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.0.1" />
@@ -55,6 +61,10 @@
 
 	<ItemGroup>
 		<Folder Include="Properties\PublishProfiles\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="AzureNamingTool.UnitTests" />
 	</ItemGroup>
 
 </Project>

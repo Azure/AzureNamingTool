@@ -150,15 +150,18 @@ namespace AzureNamingTool.Repositories
             using var transaction = await _dbContext.Database.BeginTransactionAsync();
             try
             {
-                // Remove all existing entities
+                // Remove all existing entities and persist the delete first.
+                // Saving delete+insert in one batch can violate UNIQUE constraints
+                // when replacement entities reuse the same primary keys.
                 var existingEntities = await _dbSet.ToListAsync();
                 _dbSet.RemoveRange(existingEntities);
+                await _dbContext.SaveChangesAsync();
 
-                // Add new entities
+                // Add replacement entities and persist insert in a second batch.
                 await _dbSet.AddRangeAsync(entities);
+                await _dbContext.SaveChangesAsync();
 
                 // Commit changes
-                await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
 
                 // Invalidate cache

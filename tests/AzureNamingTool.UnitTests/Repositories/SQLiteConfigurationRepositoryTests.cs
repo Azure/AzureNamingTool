@@ -335,6 +335,31 @@ public class SQLiteConfigurationRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAllAsync_ShouldReplaceEntities_WhenPrimaryKeysAreReused()
+    {
+        var existingData = new List<ResourceType>
+        {
+            new() { Id = 1, Resource = "old1", ShortName = "o1", Enabled = true },
+            new() { Id = 2, Resource = "old2", ShortName = "o2", Enabled = true }
+        };
+        await _dbContext.ResourceTypes.AddRangeAsync(existingData);
+        await _dbContext.SaveChangesAsync();
+
+        var replacementData = new List<ResourceType>
+        {
+            new() { Id = 1, Resource = "new1", ShortName = "n1", Enabled = true },
+            new() { Id = 2, Resource = "new2", ShortName = "n2", Enabled = true }
+        };
+
+        await _repository.SaveAllAsync(replacementData);
+
+        var allItems = await _dbContext.ResourceTypes.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+        allItems.Select(x => x.Id).Should().Equal(1, 2);
+        allItems.Select(x => x.Resource).Should().Equal("new1", "new2");
+        _cacheServiceMock.Verify(x => x.InvalidateCacheObject(It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
     public async Task SaveAllAsync_ShouldThrowArgumentNullException_WhenEntitiesIsNull()
     {
         // Arrange

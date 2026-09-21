@@ -10,7 +10,6 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace AzureNamingTool.Services
@@ -305,6 +304,8 @@ namespace AzureNamingTool.Services
                 ResourceDelimiter resourceDelimiter = new();
                 ResourceType resourceType = new();
                 string name = "";
+                int resourceInstanceStartIndex = -1;
+                int resourceInstanceLength = 0;
                 StringBuilder sbMessage = new();
                 bool previousdelimiterappliedafter = true;
 
@@ -600,6 +601,12 @@ namespace AzureNamingTool.Services
                                                             }
                                                         }
 
+                                                        if (component.Name == "ResourceInstance")
+                                                        {
+                                                            resourceInstanceStartIndex = name.Length;
+                                                            resourceInstanceLength = value.Length;
+                                                        }
+
                                                         name += value;
 
                                                         // Add property to array for individual component validation
@@ -853,6 +860,7 @@ namespace AzureNamingTool.Services
                     ResourceType = resourceType.ShortName,
                     Name = name
                 };
+                string nameBeforeValidation = name;
                 serviceResponse = await _resourceTypeService.ValidateResourceTypeNameAsync(validateNameRequest);
                 if (serviceResponse.Success)
                 {
@@ -863,6 +871,24 @@ namespace AzureNamingTool.Services
                         if (!String.IsNullOrEmpty(validateNameResponse.Name))
                         {
                             name = validateNameResponse.Name;
+                            if (resourceInstanceStartIndex >= 0 && name.Length != nameBeforeValidation.Length)
+                            {
+                                string nameWithoutDelimiter = nameBeforeValidation.Replace(resourceDelimiter.Delimiter, "");
+                                if (String.Equals(name, nameWithoutDelimiter, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    int originalStartIndex = resourceInstanceStartIndex;
+                                    resourceInstanceStartIndex = nameBeforeValidation[..originalStartIndex]
+                                        .Replace(resourceDelimiter.Delimiter, "").Length;
+                                    resourceInstanceLength = nameBeforeValidation
+                                        .Substring(originalStartIndex, resourceInstanceLength)
+                                        .Replace(resourceDelimiter.Delimiter, "").Length;
+                                }
+                                else
+                                {
+                                    resourceInstanceStartIndex = -1;
+                                    resourceInstanceLength = 0;
+                                }
+                            }
                         }
                         if (!String.IsNullOrEmpty(validateNameResponse.Message))
                         {
@@ -875,16 +901,13 @@ namespace AzureNamingTool.Services
                 {
                     bool nameallowed = true;
                     
-                    // Check if Azure validation is enabled - if so, skip internal duplicate check
-                    // as Azure validation will handle conflict resolution
-                    var configData = ConfigurationHelper.GetConfigurationData();
-                    var azureValidationEnabled = configData?.AzureTenantNameValidationEnabled?.Equals("True", StringComparison.OrdinalIgnoreCase) == true;
-                    
+                    // Internal duplicate handling is based on generated-name history and should
+                    // run regardless of Azure tenant validation settings.
                     bool nameexists = await ConfigurationHelper.CheckIfGeneratedNameExists(name, _generatedNamesService);
-                    if (nameexists && !azureValidationEnabled)
+                    if (nameexists)
                     {
-                        // Check if the request contains Resource Instance is a selected componoent
-                        if (!String.IsNullOrEmpty(GeneralHelper.GetPropertyValue(request, "ResourceInstance")?.ToString()))
+                        // Check if Resource Instance was included in the generated name.
+                        if (resourceInstanceStartIndex >= 0 && resourceInstanceLength > 0)
                         {
                             // Check if the name should be auto-incremented
                             if (Convert.ToBoolean(ConfigurationHelper.GetAppSetting("AutoIncrementResourceInstance")))
@@ -908,8 +931,29 @@ namespace AzureNamingTool.Services
                                         {
                                             newinstance = "0" + newinstance;
                                         }
-                                        // Replace the new instance in the original name
-                                        name = originalname.Replace(originalinstance, newinstance);
+                                        string incrementedName = ReplaceResourceInstance(
+                                            originalname,
+                                            resourceInstanceStartIndex,
+                                            resourceInstanceLength,
+                                            newinstance);
+                                        serviceResponse = await _resourceTypeService.ValidateResourceTypeNameAsync(new ValidateNameRequest
+                                        {
+                                            ResourceTypeId = resourceType.Id,
+                                            ResourceType = resourceType.ShortName,
+                                            Name = incrementedName
+                                        });
+                                        ValidateNameResponse? incrementedNameResponse =
+                                            serviceResponse.ResponseObject as ValidateNameResponse;
+                                        if (!serviceResponse.Success || incrementedNameResponse is null || !incrementedNameResponse.Valid)
+                                        {
+                                            resourceNameResponse.ResourceName = "***RESOURCE NAME NOT GENERATED***";
+                                            resourceNameResponse.Message = incrementedNameResponse?.Message
+                                                ?? "The auto-incremented resource name is invalid.";
+                                            return resourceNameResponse;
+                                        }
+                                        name = String.IsNullOrEmpty(incrementedNameResponse.Name)
+                                            ? incrementedName
+                                            : incrementedNameResponse.Name;
                                         // Increase the counter
                                         i += 1;
                                     }
@@ -1095,6 +1139,16 @@ namespace AzureNamingTool.Services
                 resourceNameResponse.Message = ex.Message;
                 return resourceNameResponse;
             }
+        }
+
+        internal static string ReplaceResourceInstance(
+            string resourceName,
+            int instanceStartIndex,
+            int instanceLength,
+            string replacement)
+        {
+            return resourceName.Remove(instanceStartIndex, instanceLength)
+                .Insert(instanceStartIndex, replacement);
         }
     }
 }
