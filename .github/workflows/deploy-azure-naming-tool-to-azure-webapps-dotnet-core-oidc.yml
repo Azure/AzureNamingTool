@@ -1,0 +1,107 @@
+# This workflow builds and deploys a .NET Core application to an Azure Web App when a push is made to the main branch.
+#
+# This workflow assumes you have already created the target Azure App Service Web App.
+# For instructions, see: https://docs.microsoft.com/en-us/azure/app-service/quickstart-dotnetcore?tabs=net60&pivots=development-environment-vscode
+#
+# Workflow setup:
+#
+# 1. Create the following secrets in your repository:
+#    - AZURE_CLIENT_ID: The ID of your Azure AD registered application.
+#    - AZURE_TENANT_ID: Your Azure AD tenant ID.
+#    - AZURE_SUBSCRIPTION_ID: Your Azure subscription ID.
+#    - AZURE_WEBAPP_NAME: The name of your Azure App Service.
+#
+# This workflow uses OIDC authentication to securely connect to Azure.
+#
+# More information about GitHub Actions for Azure: https://github.com/Azure/Actions
+# More information about the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More workflow samples for deploying to Azure: https://github.com/Azure/actions-workflow-samples
+
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: Build and deploy ASP.Net Core app to Azure Web App - azurenamingtool
+
+env:
+  AZURE_WEBAPP_PACKAGE_PATH: '.'      # set this to the path to your web app project, defaults to the repository root
+  AZURE_WEBAPP_SLOT_NAME: 'Production'
+  DOTNET_VERSION: '10.0.x'
+
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+
+defaults:
+  run:
+    working-directory: src
+    
+permissions:
+  contents: read
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src
+    permissions:
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build with dotnet
+        run: dotnet build --configuration Release
+
+      - name: dotnet publish
+        run: dotnet publish -c Release -o ${{env.DOTNET_ROOT}}/myapp
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: .net-app
+          path: ${{env.DOTNET_ROOT}}/myapp
+
+  deploy:
+    defaults:
+      run:
+        working-directory: .
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: 'Production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+    permissions:
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: .net-app
+      
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Web App
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          slot-name: ${{env.AZURE_WEBAPP_SLOT_NAME}}
+          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
